@@ -28,34 +28,42 @@ def parse_gc_logs(log_file):
     # 4794.607: [GC (Allocation Failure) 4794.607: [ParNew: 415412K->3354K(460096K), 0.0101589 secs] 3673497K->3261440K(6240384K), 0.0102789 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
     # This pattern matches "3673497K->3261440K" and captures "3261440K"
     # The pattern now includes two "->" patterns
-    pattern = re.compile(r'(\d+K)->\d+K.*(\d+K)->(\d+K)')
+    pattern1 = re.compile(r'(\d+K)->\d+K.*(\d+K)->(\d+K)')
+    pattern2 = re.compile(r'(\d+K)->(\d+K)')
 
     heap_sizes = []
     gc_times = []
     last_timestamp = None
 
     for line in log_data:
-        match = pattern.search(line)
-        if match:
-            # Extract the time since startup for this GC event
-            timestamp_match = re.search(r'^\d+.\d+', line)
-            if timestamp_match is not None:
-                gc_time = timestamp_match.group()
-                gc_time = startup_time + timedelta(seconds=float(gc_time))
+        match1 = pattern1.search(line)
+        match2 = pattern2.search(line)
+        if match1:
+            # The second "->" match is now in groups 2 and 3
+            heap_size = match1.group(3)
+        elif match2:
+            heap_size = match2.group(2)
+        else:
+            continue
 
-                # If this timestamp is within 5 minutes of the last timestamp, skip this iteration
-                if last_timestamp is not None and gc_time - last_timestamp < timedelta(minutes=5):
-                    #logging.info(f"Timestamp {gc_time} is within 5 minutes of the last timestamp {last_timestamp}. Skipping this iteration.")
-                    continue
+        # Extract the time since startup for this GC event
+        timestamp_match = re.search(r'^\d+.\d+', line)
+        if timestamp_match is not None:
+            gc_time = timestamp_match.group()
+            gc_time = startup_time + timedelta(seconds=float(gc_time))
 
-                gc_times.append(gc_time)
-                last_timestamp = gc_time  # Update the last timestamp
+            # If this timestamp is within 5 minutes of the last timestamp, skip this iteration
+            if last_timestamp is not None and gc_time - last_timestamp < timedelta(minutes=5):
+                #logging.info(f"Timestamp {gc_time} is within 5 minutes of the last timestamp {last_timestamp}. Skipping this iteration.")
+                continue
 
-                heap_size = match.group(3)
-                heap_sizes.append(heap_size)
-            else:
-                logging.warning(f"No match found in line: {line}")
-                continue  # Skip the rest of this iteration
+            gc_times.append(gc_time)
+            last_timestamp = gc_time  # Update the last timestamp
+
+            heap_sizes.append(heap_size)
+        else:
+            logging.warning(f"No match found in line: {line}")
+            continue  # Skip the rest of this iteration
 
     return heap_sizes, gc_times
 
