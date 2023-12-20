@@ -136,12 +136,66 @@ def process_logs(log_folder, output_folder, log_file):
 
     logging.info(f'Processed {len(log_files_by_process)} processes')
 
+# Scrape a webpage and save the HTML to a file
+# The file should be saved in the pac_weiyu folder.
+# The file name should be the title of the webpage.
+from bs4 import BeautifulSoup
+import requests
+import os
+import certifi
+import string
+
+def scrape_and_save(url):
+    # Make a request to the website
+    cookies = {
+        '_pk_id.30.f982': 'a4a4e4a268a50cc0.1698194867.3.1701159916.1701159873.',
+        '_pk_id.36.f982': 'a4a4e4a268a50cc0.1694498672.20.1702951434.1702951434.',
+        '_pk_id.51.f982': 'a4a4e4a268a50cc0.1695628831.0.1702290093..',
+        '_mkto_trk': 'id:876-RTE-754&token:_mch-murex.com-1694393149066-26709',
+        '_pk_id.43.f982': '0ee009cb96be1e2d.1700620184.2.1701153663.1701153663.',
+        '_ga_CK8VHLWMNX': 'GS1.2.1697444447.2.1.1697444627.0.0.0',
+        '_ga': 'GA1.2.882601883.1696919315',
+        'JSESSIONID': 'E977BE97711F55EF0333384967B767E7'
+        # Add more cookies if needed
+    }
+
+    r = requests.get(url, cookies=cookies, verify=False)
+    
+    # Parse the page content
+    soup = BeautifulSoup(r.content, 'html.parser')
+
+    # Extract the title of the webpage
+    title_tag = soup.find('title')
+
+    if title_tag is None:
+        # Use the last section of the URL as the title if no title tag is found
+        title = url.split('/')[-1]
+    else:
+        title = title_tag.text
+
+    # Replace any characters in the title that are not valid in file names
+    valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    filename = ''.join(c for c in title if c in valid_chars)
+
+    # Add the .html extension to the file name
+    filename += '.html'
+
+    # Create the pac_weiyu folder if it doesn't exist
+    if not os.path.exists('pac_weiyu'):
+        os.makedirs('pac_weiyu')
+
+    # Save the page content to a file in the pac_weiyu folder
+    with open(os.path.join('pac_weiyu', filename), 'w') as f:
+        f.write(r.text)
+
 def main():
     log_folder = "logs/gc"
     output_folder = "pac_weiyu"
     log_file = "pac_weiyu.log"
 
-    process_logs(log_folder, output_folder, log_file)
+    # process_logs(log_folder, output_folder, log_file)
+
+    scrape_and_save('https://mxwiki.murex.com/confluence/display/OPEV/%5BPT%5D+Oracle+Database+Servers+Support+Matrix')
 
 if __name__ == "__main__":
     main()

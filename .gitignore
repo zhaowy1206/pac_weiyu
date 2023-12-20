@@ -1,4 +1,6 @@
 /logs/
+/pac_weiyu/
 pac_weiyu.log
 *.csv
 *.png
+*.crt
