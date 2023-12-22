@@ -4,3 +4,5 @@ pac_weiyu.log
 *.csv
 *.png
 *.crt
+*.diff
+*.xlsx

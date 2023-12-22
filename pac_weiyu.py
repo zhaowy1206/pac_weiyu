@@ -164,26 +164,74 @@ def scrape_and_get_content(url, cookies):
     # Return the page content
     return r.text
 
+# This function takes the git diff output as a string and the path to the Excel file as parameters. 
+# It splits the git diff output into lines, and for each line, it checks if it starts with '+', '-', or 'diff'. 
+# It then writes the line type and the content of the line to the Excel file.
+import pandas as pd
+import re
+
+def clean_illegal_chars(val):
+    # The list of illegal characters in Excel
+    illegal_chars = [chr(i) for i in range(0,32)]
+    illegal_chars += ['*', ':', '[', ']', '?']
+
+    for char in illegal_chars:
+        val = val.replace(char, '')
+    return val
+
+def parse_git_diff_to_excel(git_diff_file_path, excel_file_path):
+    with open(git_diff_file_path, 'r', encoding='ISO-8859-1') as file:
+        git_diff_output = file.read()
+
+    # Split the git diff output into sections
+    sections = re.split(r"(diff --git .+)", git_diff_output)[1:]
+    sections = [sections[n:n+2] for n in range(0, len(sections), 2)]
+
+    data = []
+    for section in sections:
+        file_path = clean_illegal_chars(section[0].split(' ')[2])
+        lines = section[1].split('\n')
+        change_type = ''
+        content = ''
+        for line in lines:
+            if line.startswith('new file mode') or line.startswith('deleted file mode'):
+                change_type = clean_illegal_chars(line)
+            elif line.startswith('diff --git'):
+                data.append([file_path, change_type, content])
+                file_path = clean_illegal_chars(line.split(' ')[2])
+                change_type = ''
+                content = ''
+            else:
+                content += clean_illegal_chars(line) + '\n'
+        data.append([file_path, change_type, content])
+
+    df = pd.DataFrame(data, columns=['File Path', 'Change Type', 'Content'])
+    df.to_excel(excel_file_path, index=False)
+
 def main():
-    log_folder = "logs/gc"
-    output_folder = "pac_weiyu"
-    log_file = "pac_weiyu.log"
+    #log_folder = "logs/gc"
+    #output_folder = "pac_weiyu"
+    #log_file = "pac_weiyu.log"
 
     # process_logs(log_folder, output_folder, log_file)
 
-    cookies = {
-        '_pk_id.30.f982': 'a4a4e4a268a50cc0.1698194867.3.1701159916.1701159873.',
-        '_pk_id.36.f982': 'a4a4e4a268a50cc0.1694498672.20.1702951434.1702951434.',
-        '_pk_id.51.f982': 'a4a4e4a268a50cc0.1695628831.0.1702290093..',
-        '_mkto_trk': 'id:876-RTE-754&token:_mch-murex.com-1694393149066-26709',
-        '_pk_id.43.f982': '0ee009cb96be1e2d.1700620184.2.1701153663.1701153663.',
-        '_ga_CK8VHLWMNX': 'GS1.2.1697444447.2.1.1697444627.0.0.0',
-        '_ga': 'GA1.2.882601883.1696919315',
-        'JSESSIONID': 'E977BE97711F55EF0333384967B767E7'
-        # Add more cookies if needed
-    }
-    webpage_content = scrape_and_get_content('https://mxwiki.murex.com/confluence/display/OPEV/%5BPT%5D+Oracle+Database+Servers+Support+Matrix', cookies)
-    print(webpage_content)
+    #cookies = {
+    #     '_pk_id.30.f982': 'a4a4e4a268a50cc0.1698194867.3.1701159916.1701159873.',
+    #     '_pk_id.36.f982': 'a4a4e4a268a50cc0.1694498672.20.1702951434.1702951434.',
+    #     '_pk_id.51.f982': 'a4a4e4a268a50cc0.1695628831.0.1702290093..',
+    #     '_mkto_trk': 'id:876-RTE-754&token:_mch-murex.com-1694393149066-26709',
+    #     '_pk_id.43.f982': '0ee009cb96be1e2d.1700620184.2.1701153663.1701153663.',
+    #     '_ga_CK8VHLWMNX': 'GS1.2.1697444447.2.1.1697444627.0.0.0',
+    #     '_ga': 'GA1.2.882601883.1696919315',
+    #     'JSESSIONID': 'E977BE97711F55EF0333384967B767E7'
+    #     # Add more cookies if needed
+    # }
+    # webpage_content = scrape_and_get_content('https://mxwiki.murex.com/confluence/display/OPEV/%5BPT%5D+Oracle+Database+Servers+Support+Matrix', cookies)
+    # print(webpage_content)
+
+    git_diff_file_path = 'pac_weiyu.diff'
+    csv_file_path = 'pac_weiyu.xlsx'
+    parse_git_diff_to_excel(git_diff_file_path, csv_file_path)
 
 if __name__ == "__main__":
     main()
