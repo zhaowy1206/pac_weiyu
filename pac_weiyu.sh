@@ -71,3 +71,18 @@ retrieve_stack_and_pack_log_files() {
   zip -r $final_zip_file stack_and_log_*.zip >> "$logfile"
   rm stack_and_log_*.zip
 }
+
+# Call the function based on the first argument
+case $1 in
+  execute_and_time)
+    shift # Remove the first argument
+    execute_and_time "$@"
+    ;;
+  retrieve_stack_and_pack_log_files)
+    shift # Remove the first argument
+    retrieve_stack_and_pack_log_files "$@"
+    ;;
+  *)
+    echo "Unknown function: $1"
+    ;;
+esac
