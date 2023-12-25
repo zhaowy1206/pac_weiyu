@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,12 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
-	_ "github.com/godror/godror"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -34,8 +31,8 @@ func main() {
 
 	// Map function names to function calls
 	funcs := map[string]func(){
-		"monitorLogs":     monitorLogs,
-		"monitorSessions": monitorSessions,
+		"monitorLogs":            monitorLogs,
+		"TestDatabaseConnection": TestDatabaseConnection,
 		// Add more functions here
 	}
 
@@ -151,78 +148,70 @@ func tailFile(filename string) {
 	}
 }
 
-// Create a plot in the console view, and feed it with the data retrieved from a Oracle database to monitor how many sessions are there in realtime.
-func monitorSessions() {
-	if err := ui.Init(); err != nil {
-		log.Fatalf("failed to initialize termui: %v", err)
-	}
-	defer ui.Close()
-
-	p := widgets.NewPlot()
-	p.Title = "Oracle Sessions"
-	p.Data = make([][]float64, 1)
-	p.Data[0] = make([]float64, 0)
-	p.SetRect(0, 0, 50, 25)
-	p.AxesColor = ui.ColorWhite
-	p.LineColors[0] = ui.ColorGreen
-
-	// Initialize p.Data[0] with a dummy data point
-	p.Data[0] = append(p.Data[0], 0)
-
-	//ui.Render(p)
+func gatherConnectionInfo(r io.Reader) (string, string, string, string, string, error) {
+	reader := bufio.NewReader(r)
 
 	fmt.Print("Enter IP address: ")
-	var ip string
-	fmt.Scanln(&ip)
+	ip, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "", "", "", "", err
+	}
 
 	fmt.Print("Enter port: ")
-	var port string
-	fmt.Scanln(&port)
+	port, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+
+	fmt.Print("Enter service name: ")
+	serviceName, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "", "", "", "", err
+	}
 
 	fmt.Print("Enter username: ")
-	var username string
-	fmt.Scanln(&username)
+	username, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "", "", "", "", err
+	}
 
 	fmt.Print("Enter password: ")
-	bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+	passwordBytes, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
-		log.Fatal(err)
+		return "", "", "", "", "", err
 	}
-	password := string(bytePassword)
+	password := string(passwordBytes)
+	fmt.Println() // Print a newline after the password input
 
-	connStr := fmt.Sprintf("%s/%s@%s:%s/sid", username, password, ip, port)
+	return strings.TrimSpace(ip), strings.TrimSpace(port), strings.TrimSpace(username), strings.TrimSpace(password), strings.TrimSpace(serviceName), nil
+}
 
+func TestDatabaseConnection() {
+	ip, port, username, password, servicename, err := gatherConnectionInfo(os.Stdin)
+	if err != nil {
+		log.Fatalf("Error gathering connection info: %v", err)
+	}
+
+	connStr := fmt.Sprintf("%s/%s@%s:%s/%s", username, password, ip, port, servicename)
+
+	// Attempt to connect to the database
 	db, err := sql.Open("godror", connStr)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Failed to connect to the database: %v", err)
 	}
-	defer db.Close()
 
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			var count float64
-			err := db.QueryRow("SELECT COUNT(*) FROM v$session").Scan(&count)
-			if err != nil {
-				log.Fatal(err)
-			}
+	var count float64
+	err = db.QueryRow("SELECT COUNT(*) FROM v$session").Scan(&count)
+	if err != nil {
+		fmt.Printf("Failed to run the SQL: %v\n", err)
+		fmt.Printf("The connStr was: %v\n", connStr)
+	} else {
+		fmt.Printf("The number of sessions is: %f\n", count)
+	}
 
-			mu.Lock() // Lock the mutex before modifying p.Data
-			// Remove the dummy data point after you've added the first real data point
-			if len(p.Data[0]) == 1 && p.Data[0][0] == 0 {
-				p.Data[0] = p.Data[0][1:]
-			}
-
-			p.Data[0] = append(p.Data[0], count)
-			if len(p.Data[0]) > 50 {
-				p.Data[0] = p.Data[0][1:]
-			}
-			mu.Unlock() // Unlock the mutex after modifying p.Data
-
-			mu.Lock() // Lock the mutex before rendering
-			ui.Render(p)
-			mu.Unlock() // Unlock the mutex after rendering
-		}
+	// Close the connection
+	err = db.Close()
+	if err != nil {
+		fmt.Println("Failed to close the database connection: %v", err)
 	}
 }
