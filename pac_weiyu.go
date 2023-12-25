@@ -2,20 +2,31 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
+	_ "github.com/godror/godror"
+	"golang.org/x/crypto/ssh/terminal"
 )
+
+var mu sync.Mutex
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: ./pac_weiyu <function_name>")
+		fmt.Println("Usage: ./pac_weiyu <function_name> <arg>")
 		os.Exit(1)
 	}
 
@@ -23,7 +34,8 @@ func main() {
 
 	// Map function names to function calls
 	funcs := map[string]func(){
-		"monitorLogs": func() { monitorLogs("./logs") },
+		"monitorLogs":     monitorLogs,
+		"monitorSessions": monitorSessions,
 		// Add more functions here
 	}
 
@@ -40,7 +52,8 @@ func main() {
 //
 // let the user choose which ones to monitor,
 // and then tail those files in real-time.
-func monitorLogs(dir string) {
+func monitorLogs() {
+	dir := "logs"
 	_, err := ioutil.ReadDir(dir)
 	if err != nil {
 		fmt.Println("Error reading directory:", err)
@@ -135,5 +148,81 @@ func tailFile(filename string) {
 
 	if err := cmd.Wait(); err != nil {
 		fmt.Println("Error waiting for command:", err)
+	}
+}
+
+// Create a plot in the console view, and feed it with the data retrieved from a Oracle database to monitor how many sessions are there in realtime.
+func monitorSessions() {
+	if err := ui.Init(); err != nil {
+		log.Fatalf("failed to initialize termui: %v", err)
+	}
+	defer ui.Close()
+
+	p := widgets.NewPlot()
+	p.Title = "Oracle Sessions"
+	p.Data = make([][]float64, 1)
+	p.Data[0] = make([]float64, 0)
+	p.SetRect(0, 0, 50, 25)
+	p.AxesColor = ui.ColorWhite
+	p.LineColors[0] = ui.ColorGreen
+
+	// Initialize p.Data[0] with a dummy data point
+	p.Data[0] = append(p.Data[0], 0)
+
+	//ui.Render(p)
+
+	fmt.Print("Enter IP address: ")
+	var ip string
+	fmt.Scanln(&ip)
+
+	fmt.Print("Enter port: ")
+	var port string
+	fmt.Scanln(&port)
+
+	fmt.Print("Enter username: ")
+	var username string
+	fmt.Scanln(&username)
+
+	fmt.Print("Enter password: ")
+	bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		log.Fatal(err)
+	}
+	password := string(bytePassword)
+
+	connStr := fmt.Sprintf("%s/%s@%s:%s/sid", username, password, ip, port)
+
+	db, err := sql.Open("godror", connStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			var count float64
+			err := db.QueryRow("SELECT COUNT(*) FROM v$session").Scan(&count)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			mu.Lock() // Lock the mutex before modifying p.Data
+			// Remove the dummy data point after you've added the first real data point
+			if len(p.Data[0]) == 1 && p.Data[0][0] == 0 {
+				p.Data[0] = p.Data[0][1:]
+			}
+
+			p.Data[0] = append(p.Data[0], count)
+			if len(p.Data[0]) > 50 {
+				p.Data[0] = p.Data[0][1:]
+			}
+			mu.Unlock() // Unlock the mutex after modifying p.Data
+
+			mu.Lock() // Lock the mutex before rendering
+			ui.Render(p)
+			mu.Unlock() // Unlock the mutex after rendering
+		}
 	}
 }
