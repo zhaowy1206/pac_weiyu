@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 var mu sync.Mutex
@@ -31,8 +34,9 @@ func main() {
 		fmt.Println("Usage: pac_weiyu.go <function> [arguments]")
 		fmt.Println("\nFunctions:")
 		fmt.Println("  executeAndTime <script> <times> <pacingTime>")
-		fmt.Println("  retrieveStackAndPackLogFiles")
 		fmt.Println("  getStack <coreFile>")
+		fmt.Println("  monitorLogs")
+		fmt.Println("  retrieveStackAndPackLogFiles")
 		fmt.Println("  writeStackToFile <coreFile>")
 		os.Exit(1)
 	}
@@ -70,7 +74,8 @@ func main() {
 			fmt.Printf("Error writing stack to file: %v\n", err)
 			os.Exit(1)
 		}
-
+	case "monitorLogs":
+		monitorLogs()
 	default:
 		fmt.Println("Unknown function:", os.Args[1])
 	}
@@ -85,10 +90,97 @@ func writeLog(logfile *os.File, message string) {
 	}
 }
 
-//	List all the files that are 10 latest updated in a directory,
-//
-// let the user choose which ones to monitor,
-// and then tail those files in real-time.
+func getLast100thLinePos(filePath string) (int64, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var lines []int64
+	var pos int64
+	for scanner.Scan() {
+		lines = append(lines, pos)
+		pos += int64(len(scanner.Bytes())) + 1 // +1 for newline character
+		if len(lines) > 100 {
+			lines = lines[1:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	if len(lines) == 0 {
+		return 0, nil
+	}
+
+	return lines[0], nil
+}
+
+func watchFile(filePath string, logfile *os.File) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	var lastPos int64 = 0
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				//writeLog(logfile, "event: "+event.String())
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					//writeLog(logfile, "modified file: "+event.Name)
+					file, err := os.Open(event.Name)
+					if err != nil {
+						writeLog(logfile, "error opening file: "+err.Error())
+						continue
+					}
+					lastPos, err = getLast100thLinePos(event.Name)
+					if err != nil {
+						writeLog(logfile, "error getting last 100th line position: "+err.Error())
+						continue
+					}
+					file.Seek(lastPos, 0)
+					reader := io.Reader(file)
+					contents, err := io.ReadAll(reader)
+					if err != nil {
+						writeLog(logfile, "error reading file: "+err.Error())
+					} else {
+						lines := strings.Split(string(contents), "\n")
+						for _, line := range lines {
+							lineLower := strings.ToLower(line)
+							if strings.Contains(lineLower, "error") || strings.Contains(lineLower, "fail") || strings.Contains(lineLower, "exception") {
+								fmt.Println(filePath + ": " + line)
+							}
+						}
+						lastPos, _ = file.Seek(0, io.SeekEnd)
+					}
+					file.Close()
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				writeLog(logfile, "error: "+err.Error())
+			}
+		}
+	}()
+
+	err = watcher.Add(filePath)
+	if err != nil {
+		return err
+	}
+	<-done
+	return nil
+}
+
 func monitorLogs() {
 	dir := "logs"
 	_, err := ioutil.ReadDir(dir)
@@ -127,13 +219,17 @@ func monitorLogs() {
 		logFiles = logFiles[len(logFiles)-10:]
 	}
 
-	// Automatically tail the 10 latest files
+	// Automatically watch the 10 latest files
 	for _, file := range logFiles {
-		go tailFile(file.Path)
-		// fmt.Printf("Path: %s, Modification time: %s\n", file.Path, file.ModTime)
+		go func(filePath string) {
+			err := watchFile(filePath, logfile)
+			if err != nil {
+				fmt.Println("Error watching file:", err)
+			}
+		}(file.Path)
 	}
 
-	// Only block if at least one tailFile goroutine was started
+	// Only block if at least one watchFile goroutine was started
 	if len(logFiles) > 0 {
 		// Prevent the program from exiting
 		select {}

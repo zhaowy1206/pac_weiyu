@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/godror/knownpb v0.1.1 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
