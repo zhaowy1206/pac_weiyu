@@ -31,7 +31,7 @@ func init() {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: pac_weiyu.go <function> [arguments]")
+		fmt.Println("Usage: ./pac_weiyu <function> [arguments]")
 		fmt.Println("\nFunctions:")
 		fmt.Println("  executeAndTime <script> <times> <pacingTime>")
 		fmt.Println("  getStack <coreFile>")
@@ -45,7 +45,7 @@ func main() {
 	switch os.Args[1] {
 	case "executeAndTime":
 		if len(os.Args) < 5 {
-			fmt.Println("Usage: pac_weiyu.go executeAndTime <script> <times> <pacingTime>")
+			fmt.Println("Usage: ./pac_weiyu executeAndTime <script> <times> <pacingTime>")
 			os.Exit(1)
 		}
 		times, _ := strconv.Atoi(os.Args[3])      // Convert os.Args[3] to int
@@ -55,7 +55,7 @@ func main() {
 		retrieveStackAndPackLogFiles()
 	case "getStack":
 		if len(os.Args) < 3 {
-			fmt.Println("Usage: pac_weiyu.go getStack <coreFile>")
+			fmt.Println("Usage: ./pac_weiyu getStack <coreFile>")
 			os.Exit(1)
 		}
 		stack, err := getStack(os.Args[2])
@@ -66,7 +66,7 @@ func main() {
 		fmt.Printf("Stack for %s: %s\n", os.Args[2], stack)
 	case "writeStackToFile":
 		if len(os.Args) < 3 {
-			fmt.Println("Usage: pac_weiyu.go writeStackToFile <coreFile>")
+			fmt.Println("Usage: ./pac_weiyu writeStackToFile <coreFile>")
 			os.Exit(1)
 		}
 		err := writeStackToFile(os.Args[2])
