@@ -2,11 +2,15 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -15,6 +19,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
 
 var mu sync.Mutex
@@ -38,6 +44,8 @@ func main() {
 		fmt.Println("  monitorLogs")
 		fmt.Println("  retrieveStackAndPackLogFiles")
 		fmt.Println("  writeStackToFile <coreFile>")
+		fmt.Println("  getJavaHeapSize <pid>")
+		fmt.Println("  exportHeapSizeMetric <pid>")
 		os.Exit(1)
 	}
 
@@ -76,6 +84,25 @@ func main() {
 		}
 	case "monitorLogs":
 		monitorLogs()
+	case "getJavaHeapSize": // Add case for getJavaHeapSize
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: ./pac_weiyu getJavaHeapSize <pid>")
+			os.Exit(1)
+		}
+		pid, _ := strconv.Atoi(os.Args[2]) // Convert os.Args[2] to int
+		heapSize, err := getJavaHeapSize(pid)
+		if err != nil {
+			fmt.Printf("Failed to get Java heap size for PID %d: %v\n", pid, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Java heap size for PID %d: %dMB\n", pid, int(heapSize))
+	case "exportHeapSizeMetric":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: ./pac_weiyu exportHeapSizeMetric <pid>")
+			os.Exit(1)
+		}
+		pid, _ := strconv.Atoi(os.Args[2]) // Convert os.Args[2] to int
+		exportHeapSizeMetric(pid)
 	default:
 		fmt.Println("Unknown function:", os.Args[1])
 	}
@@ -426,4 +453,105 @@ func retrieveStackAndPackLogFiles() {
 	for _, file := range files {
 		os.Remove(file)
 	}
+}
+
+func getJavaHeapSize(pid int) (float64, error) {
+	cmd := exec.Command("bash", "-c", "source mxg2000_settings.sh && $JAVA_HOME/bin/jstat -gc "+strconv.Itoa(pid))
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
+	if err != nil {
+		return 0, err
+	}
+
+	lines := strings.Split(out.String(), "\n")
+	if len(lines) < 2 {
+		return 0, errors.New("unexpected jstat output")
+	}
+
+	fields := strings.Fields(lines[1])
+	if len(fields) < 7 {
+		return 0, errors.New("unexpected jstat output")
+	}
+
+	EU, err := strconv.ParseFloat(fields[5], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	S0U, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	S1U, err := strconv.ParseFloat(fields[3], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	OU, err := strconv.ParseFloat(fields[7], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	heapSize := EU + S0U + S1U + OU
+	heapSizeMB := heapSize / 1024
+	if err != nil {
+		return 0, err
+	}
+
+	return heapSizeMB, nil
+}
+
+func exportHeapSizeMetric(pid int) (err error) {
+	// Handle SIGINT (CTRL+C) gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// Set up OpenTelemetry.
+	serviceName := "PAC Metrics"
+	serviceVersion := "1.0"
+	otelShutdown, err := setupOTelSDK(ctx, serviceName, serviceVersion)
+
+	meter := otel.Meter("Java Heap Size")
+	if _, err := meter.Int64ObservableGauge("JavaHeapSize",
+		metric.WithDescription(
+			"Java Heap Size",
+		),
+		metric.WithUnit("MB"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			heapSize, err := getJavaHeapSize(pid)
+			if err != nil {
+				errorMessage := fmt.Sprintf("Failed to get heap size: %v", err)
+				writeLog(logfile, errorMessage)
+				return err
+			}
+
+			// Record the heap size
+			o.Observe(int64(heapSize))
+			return nil
+		}),
+	); err != nil {
+		panic(err)
+	}
+
+	if err != nil {
+		return
+	}
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		err = errors.Join(err, otelShutdown(context.Background()))
+	}()
+
+	// Run recordCPUUsage in a goroutine.
+	go serveMetrics()
+
+	// Wait for interruption.
+	<-ctx.Done()
+	// Stop receiving signal notifications as soon as possible.
+	stop()
+
+	return
 }
