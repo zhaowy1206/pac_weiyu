@@ -1,11 +1,19 @@
 #!/bin/bash
 
-# Ask the user for the schema name
-echo "Enter the schema name:"
-read schema_name
+# Function to extract the DDL SQL of a table and all the indexes on it
+extract_ddl() {
+    # The Oracle database username is the first argument to the function
+    local username=$1
+    # The Oracle database password is the second argument to the function
+    local password=$2
+    # The Oracle database connection string is the third argument to the function
+    local connection_string=$3
+    # The table name is the fourth argument to the function
+    local table_name=$4
 
-# Create the SQL commands
-sql_commands=$(cat << EOF
+    # Create the SQL commands
+    local sql_commands=$(cat << EOF
+SET SERVEROUTPUT ON
 SET HEADING OFF
 SET ECHO OFF
 SET PAGESIZE 0
@@ -17,60 +25,35 @@ SET VERIFY OFF
 SET LINESIZE 32767
 
 DECLARE
-    -- Declare a cursor for the objects
-    CURSOR object_cursor IS
-        SELECT object_type, object_name
-        FROM USER_OBJECTS
-        WHERE object_type IN ('TABLE', 'INDEX');
-
-    -- Declare a record for the object metadata
-    object_record object_cursor%ROWTYPE;
-
     -- Declare a variable for the DDL statement
     ddl CLOB;
 BEGIN
-    EXECUTE IMMEDIATE 'CREATE TABLE temp_metadata (
-        object_type VARCHAR2(19),
-        object_name VARCHAR2(128),
-        ddl CLOB
-    )';
+    -- Get the DDL statement for the table
+    ddl := DBMS_METADATA.GET_DDL('TABLE', '${table_name}');
 
-    -- Open the cursor
-    OPEN object_cursor;
+    -- Output the DDL statement
+    DBMS_OUTPUT.PUT_LINE(ddl);
 
-    -- Fetch the objects into the record
-    LOOP
-        FETCH object_cursor INTO object_record;
-        EXIT WHEN object_cursor%NOTFOUND;
+    -- Get the DDL statements for the indexes on the table
+    FOR index_record IN (SELECT index_name FROM USER_INDEXES WHERE table_name = '${table_name}') LOOP
+        ddl := DBMS_METADATA.GET_DDL('INDEX', index_record.index_name);
 
-        -- Get the DDL statement
-        ddl := DBMS_METADATA.GET_DDL(object_record.object_type, object_record.object_name);
-
-        -- Insert the object metadata into the temporary table
-        EXECUTE IMMEDIATE 'INSERT INTO temp_metadata VALUES (:1, :2, :3)' USING
-            object_record.object_type,
-            object_record.object_name,
-            ddl;
-        COMMIT;
+        -- Output the DDL statement
+        DBMS_OUTPUT.PUT_LINE(ddl);
     END LOOP;
-
-    -- Close the cursor
-    CLOSE object_cursor;
     COMMIT;
 END;
 /
-
-SPOOL ${schema_name}_metadata.txt
-SELECT ddl FROM temp_metadata order by object_type, object_name;
-SPOOL OFF
-
-DROP TABLE temp_metadata;
 
 EXIT;
 EOF
 )
 
-# Connect to the database and run the SQL commands
+    # Connect to the database and run the SQL commands
+    echo "$sql_commands" | sqlplus -s $username/$password@$connection_string > "${table_name}.sql" 2>&1
+}
+
+# Ask the user for the Oracle database credentials
 echo "Enter your Oracle database username:"
 read username
 echo "Enter your Oracle database password:"
@@ -78,6 +61,15 @@ read -s password
 echo "Enter your Oracle database connection string:"
 read connection_string
 
-echo "$sql_commands" | sqlplus -s $username/$password@$connection_string > /dev/null
+# Get the list of tables
+tables=$(echo "SET HEADING OFF FEEDBACK OFF PAGESIZE 0 VERIFY OFF LINESIZE 32767 TRIMSPOOL ON WRAP OFF;
+SELECT table_name FROM USER_TABLES;" | sqlplus -s $username/$password@$connection_string)
 
-echo "Metadata exported to ${schema_name}_metadata.txt."
+echo "$tables" > tables.txt
+
+# Call the function to extract the DDL SQL for each table
+for table_name in $tables; do
+    extract_ddl $username $password $connection_string $table_name
+done
+
+echo "Metadata exported to individual SQL files."
