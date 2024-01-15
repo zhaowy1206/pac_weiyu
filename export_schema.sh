@@ -35,7 +35,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE(ddl);
 
     -- Get the DDL statements for the indexes on the table
-    FOR index_record IN (SELECT index_name FROM USER_INDEXES WHERE table_name = '${table_name}') LOOP
+    FOR index_record IN (SELECT index_name FROM USER_INDEXES WHERE table_name = '${table_name}' ORDER BY index_name) LOOP
         ddl := DBMS_METADATA.GET_DDL('INDEX', index_record.index_name);
 
         -- Output the DDL statement
