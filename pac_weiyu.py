@@ -209,11 +209,11 @@ def parse_git_diff_to_excel(git_diff_file_path, excel_file_path):
     df.to_excel(excel_file_path, index=False)
 
 def main():
-    log_folder = "logs/gc"
-    output_folder = "pac_weiyu"
-    log_file = "pac_weiyu.log"
+    #log_folder = "logs/gc"
+    #output_folder = "pac_weiyu"
+    #log_file = "pac_weiyu.log"
 
-    process_logs(log_folder, output_folder, log_file)
+    #process_logs(log_folder, output_folder, log_file)
 
     #cookies = {
     #     '_pk_id.30.f982': 'a4a4e4a268a50cc0.1698194867.3.1701159916.1701159873.',
@@ -229,9 +229,9 @@ def main():
     # webpage_content = scrape_and_get_content('https://mxwiki.murex.com/confluence/display/OPEV/%5BPT%5D+Oracle+Database+Servers+Support+Matrix', cookies)
     # print(webpage_content)
 
-    #git_diff_file_path = 'pac_weiyu.diff'
-    #csv_file_path = 'pac_weiyu.xlsx'
-    #parse_git_diff_to_excel(git_diff_file_path, csv_file_path)
+    git_diff_file_path = 'schema_diff.txt'
+    csv_file_path = 'schema_diff.xlsx'
+    parse_git_diff_to_excel(git_diff_file_path, csv_file_path)
 
 if __name__ == "__main__":
     main()
