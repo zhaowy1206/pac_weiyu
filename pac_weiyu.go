@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +48,9 @@ func main() {
 		fmt.Println("  writeStackToFile <coreFile>")
 		fmt.Println("  getJavaHeapSize <pid>")
 		fmt.Println("  exportHeapSizeMetric <pid>")
+		fmt.Println("  printProcessesInCurrentPath")
+		fmt.Println("  encryptText <text>")
+		fmt.Println("  decryptText <ciphertext>")
 		os.Exit(1)
 	}
 
@@ -103,6 +108,67 @@ func main() {
 		}
 		pid, _ := strconv.Atoi(os.Args[2]) // Convert os.Args[2] to int
 		exportHeapSizeMetric(pid)
+	case "printProcessesInCurrentPath":
+		err := printProcessesInCurrentPath()
+		if err != nil {
+			fmt.Printf("Error printing processes in current path: %v\n", err)
+			os.Exit(1)
+		}
+	case "encryptText":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: ./pac_weiyu encryptText <text>")
+			os.Exit(1)
+		}
+		keyBytes, err := ioutil.ReadFile("mx.txt")
+		if err != nil {
+			fmt.Println("Error reading key file:", err)
+			os.Exit(1)
+		}
+		props := SecretKeyProperties{
+			Algorithm:            "AES",
+			CypherTransformation: "AES/CBC/PKCS5Padding",
+			HexaKey:              hex.EncodeToString(keyBytes),
+		}
+
+		crypto, err := NewPasswordCryptography(props)
+		if err != nil {
+			fmt.Println("Error initializing cryptography:", err)
+			os.Exit(1)
+		}
+		ciphertext, err := cryptText(crypto, os.Args[2])
+		if err != nil {
+			fmt.Println("Error encrypting text:", err)
+			os.Exit(1)
+		}
+		fmt.Println("Ciphertext:", ciphertext)
+
+	case "decryptText":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: ./pac_weiyu decryptText <ciphertext>")
+			os.Exit(1)
+		}
+		keyBytes, err := ioutil.ReadFile("mx.txt")
+		if err != nil {
+			fmt.Println("Error reading key file:", err)
+			os.Exit(1)
+		}
+		props := SecretKeyProperties{
+			Algorithm:            "AES",
+			CypherTransformation: "AES/CBC/PKCS5Padding",
+			HexaKey:              hex.EncodeToString(keyBytes),
+		}
+
+		crypto, err := NewPasswordCryptography(props)
+		if err != nil {
+			fmt.Println("Error initializing cryptography:", err)
+			os.Exit(1)
+		}
+		cleartext, err := decryptText(crypto, os.Args[2])
+		if err != nil {
+			fmt.Println("Error decrypting text:", err)
+			os.Exit(1)
+		}
+		fmt.Println("Cleartext:", cleartext)
 	default:
 		fmt.Println("Unknown function:", os.Args[1])
 	}
@@ -554,4 +620,74 @@ func exportHeapSizeMetric(pid int) (err error) {
 	stop()
 
 	return
+}
+
+func printProcessesInCurrentPath() error {
+	// Get the current path
+	currentPath, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	// Run the 'ps -e' command to get the list of process IDs
+	cmd := exec.Command("ps", "-e", "-o", "pid=")
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	// Split the output into lines
+	lines := strings.Split(string(output), "\n")
+
+	// Check each line
+	for _, line := range lines {
+		// Trim the line and parse the process ID
+		pidStr := strings.TrimSpace(line)
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+
+		// Run the 'pwdx' command to get the current working directory of the process
+		cmd := exec.Command("pwdx", pidStr)
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		// Check if the output contains the current path
+		match, _ := regexp.MatchString(currentPath, string(output))
+		if match {
+			fmt.Println("Process ID:", pid)
+			fmt.Println("Current working directory:", string(output))
+
+			// Run the 'ps -p' command to get the command line of the process
+			cmdLineCmd := exec.Command("ps", "-p", pidStr, "-o", "command=")
+			cmdLineOutput, err := cmdLineCmd.Output()
+			if err != nil {
+				fmt.Println("Error getting command line:", err)
+			} else {
+				fmt.Println("Command line:", string(cmdLineOutput))
+			}
+		}
+	}
+
+	return nil
+}
+
+func cryptText(crypto *PasswordCryptography, text string) (string, error) {
+	ciphertext, err := crypto.Encrypt([]byte(text))
+	if err != nil {
+		return "", err
+	}
+	return crypto.ChangeToEncryptedString(ciphertext), nil
+}
+
+func decryptText(crypto *PasswordCryptography, cryptoText string) (string, error) {
+	ciphertext := crypto.ChangeToDecryptedString(cryptoText)
+	cleartext, err := crypto.Decrypt(ciphertext)
+	if err != nil {
+		return "", err
+	}
+	return string(cleartext), nil
 }
